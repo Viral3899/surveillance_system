@@ -1,0 +1,96 @@
+# GPU-enabled Dockerfile for AI Surveillance System
+FROM nvidia/cuda:11.8.0-devel-ubuntu20.04 as base
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+ENV OPENCV_LOG_LEVEL=ERROR
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.9 \
+    python3.9-dev \
+    python3-pip \
+    # OpenCV dependencies
+    libopencv-dev \
+    python3-opencv \
+    # dlib dependencies
+    build-essential \
+    cmake \
+    libopenblas-dev \
+    liblapack-dev \
+    libx11-dev \
+    libgtk-3-dev \
+    # Face recognition dependencies
+    libboost-all-dev \
+    # Video/camera dependencies
+    v4l-utils \
+    ffmpeg \
+    # CUDA dependencies
+    libcudnn8 \
+    libcudnn8-dev \
+    # Utilities
+    wget \
+    curl \
+    unzip \
+    bzip2 \
+    # For GUI support (optional)
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python
+RUN ln -s /usr/bin/python3.9 /usr/bin/python
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements for GPU version
+COPY requirements.txt ./
+
+
+# Install Python dependencies with CUDA support
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir torch torchvision torchaudio --1index-url https://download.pytorch.org/whl/cu118 && \
+    pip3 install --no-cache-dir -r requirements.txt
+
+# Install dlib with CUDA support
+RUN pip3 install --no-cache-dir dlib
+
+# Download and setup dlib face landmarks model
+RUN mkdir -p /app/models && \
+    wget -O /tmp/shape_predictor_68_face_landmarks.dat.bz2 \
+    http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 && \
+    bunzip2 /tmp/shape_predictor_68_face_landmarks.dat.bz2 && \
+    mv /tmp/shape_predictor_68_face_landmarks.dat /app/models/
+
+# Create app user
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Create necessary directories
+RUN mkdir -p face_gallery surveillance_output/clips surveillance_output/images surveillance_output/logs && \
+    chown -R appuser:appuser face_gallery surveillance_output
+
+# Switch to non-root user
+USER appuser
+
+# Run setup script
+RUN python setup.py
+
+# Expose ports
+EXPOSE 8501 8080
+
+# Health check with GPU verification
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD python -c "import torch; print('CUDA available:', torch.cuda.is_available())" || exit 1
+
+# Default command with GPU enabled
+CMD ["python", "main.py", "--headless"] 
