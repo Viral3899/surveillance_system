@@ -4,7 +4,7 @@ Uses dlib and face_recognition library for offline processing.
 """
 import cv2
 import numpy as np
-import face_recognition
+
 import dlib
 from typing import List, Tuple, Dict, Optional
 import time

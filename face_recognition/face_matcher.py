@@ -5,7 +5,7 @@ Manages known face database and performs real-time matching.
 import os
 import pickle
 import numpy as np
-import face_recognition
+import face_recognition as fr
 import cv2
 import shutil
 from typing import Dict, List, Optional, Tuple
@@ -98,10 +98,10 @@ class FaceMatcher:
         """Add a new face to the database from an image file."""
         try:
             # Load and process image
-            image = face_recognition.load_image_file(image_path)
+            image = fr.load_image_file(image_path)
             
             # Find face encodings
-            face_encodings = face_recognition.face_encodings(image)
+            face_encodings = fr.face_encodings(image)
             
             if not face_encodings:
                 logger.warning(f"No face found in {image_path}")
@@ -198,14 +198,14 @@ class FaceMatcher:
                     continue
                 
                 # Compare against all known faces
-                matches = face_recognition.compare_faces(
+                matches = fr.compare_faces(
                     self.face_encodings, 
                     detection_encoding,
                     tolerance=self.tolerance
                 )
                 
                 # Calculate face distances for confidence scoring
-                face_distances = face_recognition.face_distance(
+                face_distances = fr.face_distance(
                     self.face_encodings, 
                     detection_encoding
                 )
@@ -380,7 +380,7 @@ class FaceMatcher:
         
         try:
             # Calculate distances to all known faces
-            face_distances = face_recognition.face_distance(
+            face_distances = fr.face_distance(
                 self.face_encodings, 
                 detection.encoding
             )

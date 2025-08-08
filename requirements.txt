@@ -1,14 +1,17 @@
-opencv-python==4.8.1.78
-numpy==1.24.3
-torch==2.0.1
-torchvision==0.15.2
-dlib==19.24.2
-face-recognition==1.3.0
-Pillow==10.0.0
-scipy==1.11.1
-scikit-learn==1.3.0
-streamlit==1.25.0
-python-dotenv==1.0.0
-imutils==0.5.4
-matplotlib==3.7.2
-tqdm==4.65.0
+opencv-python
+numpy
+# torch==2.0.1
+# torchvision==0.15.2
+dlib
+face-recognition0
+Pillow
+scipy
+scikit-learn
+streamlit
+python-dotenv
+imutils
+matplotlib
+tqdm
+plotly 
+fastapi
+strweamlit 
