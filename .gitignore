@@ -11,6 +11,8 @@ images/*
 *.jpeg
 *.png
 */models/*
+*/*.mp4
+.mp4
 # Distribution / packaging
 .Python
 build/

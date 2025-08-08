@@ -13,7 +13,7 @@ import pickle
 import os
 
 from detection.motion_detector import MotionEvent
-from face_recognition.face_detector import FaceDetection
+from face_recognition_s.face_detector import FaceDetection
 from utils.config import config
 from utils.logger import logger
 

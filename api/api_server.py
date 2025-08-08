@@ -20,8 +20,8 @@ from typing import Optional, Dict, Any
 # Import surveillance modules
 from camera.stream_handler import CameraStream, MultiCameraManager
 from detection.motion_detector import MotionDetector, MotionDetectionMethod
-from face_recognition.face_detector import FaceDetector
-from face_recognition.face_matcher import FaceMatcher
+from face_recognition_s.face_detector import FaceDetector
+from face_recognition_s.face_matcher import FaceMatcher
 from anomaly.anomaly_detector import AnomalyDetector
 from utils.config import config
 from utils.logger import logger

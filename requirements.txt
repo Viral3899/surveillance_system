@@ -1,9 +1,7 @@
 opencv-python
 numpy
-# torch==2.0.1
-# torchvision==0.15.2
 dlib
-face-recognition0
+face-recognition
 Pillow
 scipy
 scikit-learn
@@ -12,6 +10,6 @@ python-dotenv
 imutils
 matplotlib
 tqdm
-plotly 
+plotly
 fastapi
-strweamlit 
+uvicorn

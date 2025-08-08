@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     libopencv-dev \
     python3-opencv \
     dlib \
-    build-essential \
+    build-essential \   
     cmake \
     libopenblas-dev \
     liblapack-dev \

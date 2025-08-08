@@ -20,7 +20,7 @@ def create_directories():
         'models',
         'camera',
         'detection',
-        'face_recognition',
+        'face_recognition_s',
         'anomaly',
         'utils'
     ]
@@ -40,7 +40,7 @@ __all__ = ['CameraStream', 'MultiCameraManager']''',
 from .motion_detector import MotionDetector, MotionDetectionMethod, MotionEvent
 __all__ = ['MotionDetector', 'MotionDetectionMethod', 'MotionEvent']''',
         
-        'face_recognition/__init__.py': '''"""Face detection and recognition module for surveillance system."""
+        'face_recognition_s/__init__.py': '''"""Face detection and recognition module for surveillance system."""
 from .face_detector import FaceDetector, FaceDetection
 from .face_matcher import FaceMatcher, KnownFace
 __all__ = ['FaceDetector', 'FaceDetection', 'FaceMatcher', 'KnownFace']''',
