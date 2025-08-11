@@ -13,3 +13,8 @@ tqdm
 plotly
 fastapi
 uvicorn
+flask8
+openpyxl
+pandas
+pytest
+black

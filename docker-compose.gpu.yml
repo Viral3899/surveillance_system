@@ -1,19 +1,12 @@
-# Complete GPU Docker Compose - Standalone
-# This file contains all services needed for GPU-enabled AI surveillance system
+version: "3.9"
 
 services:
-  # Main GPU-enabled surveillance service
   surveillance-gpu:
     build:
       context: .
       dockerfile: Dockerfile.gpu
     container_name: ai_surveillance_gpu
     restart: unless-stopped
-    
-    # GPU runtime configuration
-    runtime: nvidia
-    
-    # GPU environment variables
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
@@ -31,25 +24,17 @@ services:
       - REDIS_PORT=6379
       - GPU_MEMORY_FRACTION=0.7
       - PYTHONPATH=/app
-    
-    # Device access for camera and GPU
     devices:
       - /dev/video0:/dev/video0
-    
-    # Volume mounts
     volumes:
       - ./face_gallery:/app/face_gallery:rw
       - ./surveillance_data:/app/surveillance_output:rw
       - ./config:/app/config:ro
       - ./models:/app/models:rw
       - gpu_model_cache:/root/.cache
-    
-    # Port mapping
     ports:
-      - "8081:8080"  # API port
-      - "8511:8501"  # Web interface port
-    
-    # Resource limits optimized for GPU
+      - "8081:8080"
+      - "8511:8501"
     deploy:
       resources:
         limits:
@@ -62,67 +47,45 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    
-    # Enhanced health check with GPU verification
     healthcheck:
-      test: |
-        python -c "
-        import torch
-        import sys
-        try:
-            assert torch.cuda.is_available(), 'CUDA not available'
-            assert torch.cuda.device_count() > 0, 'No CUDA devices found'
-            device = torch.cuda.current_device()
-            name = torch.cuda.get_device_name(device)
-            print(f'GPU Health Check: OK - {name}')
-            sys.exit(0)
-        except Exception as e:
-            print(f'GPU Health Check: FAILED - {e}')
-            sys.exit(1)
-        "
+      test: >
+        python -c "import torch,sys;
+        assert torch.cuda.is_available(), 'CUDA not available';
+        assert torch.cuda.device_count()>0, 'No CUDA devices';
+        print('GPU Health OK:', torch.cuda.get_device_name(0));
+        sys.exit(0)"
       interval: 60s
       timeout: 30s
       retries: 3
       start_period: 180s
-    
-    # Service dependencies
     depends_on:
       postgres-gpu:
         condition: service_healthy
       redis-gpu:
         condition: service_started
-    
     networks:
       - surveillance_gpu_network
 
-  # PostgreSQL database for GPU system
   postgres-gpu:
     image: postgres:15-alpine
     container_name: surveillance_db_gpu
     restart: unless-stopped
-    
     environment:
       POSTGRES_DB: surveillance
       POSTGRES_USER: surveillance_user
       POSTGRES_PASSWORD: secure_password_change_me
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-    
     volumes:
       - postgres_gpu_data:/var/lib/postgresql/data
       - ./db_init:/docker-entrypoint-initdb.d:ro
-    
     ports:
-      - "5433:5432"  # Different port to avoid conflicts
-    
-    # Database health check
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U surveillance_user -d surveillance"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    
-    # Resource limits for database
     deploy:
       resources:
         limits:
@@ -131,228 +94,139 @@ services:
         reservations:
           memory: 512M
           cpus: '0.5'
-    
     networks:
       - surveillance_gpu_network
 
-  # Redis cache for GPU system
   redis-gpu:
     image: redis:7-alpine
     container_name: surveillance_redis_gpu
     restart: unless-stopped
-    
-    command: |
-      redis-server 
-      --appendonly yes 
-      --maxmemory 512mb 
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-    
+    command: >
+      redis-server --appendonly yes --maxmemory 512mb
+      --maxmemory-policy allkeys-lru --save 900 1
+      --save 300 10 --save 60 10000
     volumes:
       - redis_gpu_data:/data
-    
     ports:
-      - "6380:6379"  # Different port to avoid conflicts
-    
-    # Redis health check
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
-    
     deploy:
       resources:
         limits:
           memory: 512M
           cpus: '0.5'
-    
     networks:
       - surveillance_gpu_network
 
-  # Web interface for GPU system
   web-interface-gpu:
     build:
       context: .
       dockerfile: Dockerfile.web
     container_name: surveillance_web_gpu
     restart: unless-stopped
-    
     environment:
       - SURVEILLANCE_API_URL=http://surveillance-gpu:8080
       - STREAMLIT_SERVER_PORT=8501
       - STREAMLIT_SERVER_ADDRESS=0.0.0.0
       - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
-    
     volumes:
       - ./surveillance_data:/app/surveillance_output:ro
       - ./face_gallery:/app/face_gallery:ro
-    
     ports:
-      - "8512:8501"  # Web interface on different port
-    
+      - "8512:8501"
     depends_on:
       - surveillance-gpu
-    
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    
     deploy:
       resources:
         limits:
           memory: 1G
           cpus: '1.0'
-    
     networks:
       - surveillance_gpu_network
 
-  # GPU monitoring service
   nvidia-monitor:
     image: nvidia/cuda:11.8-base-ubuntu20.04
     container_name: surveillance_nvidia_monitor
     restart: unless-stopped
-    runtime: nvidia
-    
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-    
-    command: |
-      bash -c "
-        echo 'Starting NVIDIA GPU monitoring...'
-        while true; do
-          {
-            echo '=== GPU Status at $$(date) ==='
-            nvidia-smi --query-gpu=timestamp,name,pci.bus_id,driver_version,pstate,pcie.link.gen.max,pcie.link.gen.current,temperature.gpu,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used --format=csv
-            echo '=== GPU Processes ==='
-            nvidia-smi pmon -c 1 2>/dev/null || echo 'No GPU processes running'
-            echo ''
-          } >> /var/log/gpu-monitor.log
-          sleep 60
-        done
-      "
-    
+    command: >
+      bash -c "while true; do
+        echo '=== GPU Status at $(date) ===';
+        nvidia-smi --query-gpu=timestamp,name,driver_version,temperature.gpu,utilization.gpu,memory.total,memory.free,memory.used --format=csv;
+        sleep 60;
+      done"
     volumes:
       - ./surveillance_data/logs:/var/log:rw
-    
     deploy:
       resources:
         limits:
           memory: 256M
           cpus: '0.25'
-    
     networks:
       - surveillance_gpu_network
 
-  # Nginx reverse proxy for GPU system
   nginx-gpu:
     image: nginx:alpine
     container_name: surveillance_nginx_gpu
     restart: unless-stopped
-    
     ports:
-      - "8090:80"   # HTTP access
-      - "8443:443"  # HTTPS access
-    
+      - "8090:80"
+      - "8443:443"
     volumes:
       - ./nginx-gpu.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
       - ./surveillance_data:/var/www/surveillance:ro
-    
     depends_on:
       - surveillance-gpu
       - web-interface-gpu
-    
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    
     networks:
       - surveillance_gpu_network
 
-  # System health monitor
   health-monitor:
     image: alpine:latest
     container_name: surveillance_health_gpu
     restart: unless-stopped
-    
-    command: |
-      sh -c "
-        apk add --no-cache curl jq
-        while true; do
-          echo '=== System Health Check at $$(date) ===' >> /var/log/health-monitor.log
-          
-          # Check API health
-          if curl -sf http://surveillance-gpu:8080/health > /dev/null; then
-            echo 'API: Healthy' >> /var/log/health-monitor.log
-          else
-            echo 'API: Unhealthy' >> /var/log/health-monitor.log
-          fi
-          
-          # Check Web interface
-          if curl -sf http://web-interface-gpu:8501/_stcore/health > /dev/null; then
-            echo 'Web: Healthy' >> /var/log/health-monitor.log
-          else
-            echo 'Web: Unhealthy' >> /var/log/health-monitor.log
-          fi
-          
-          # Check Database
-          if nc -z postgres-gpu 5432; then
-            echo 'Database: Connected' >> /var/log/health-monitor.log
-          else
-            echo 'Database: Disconnected' >> /var/log/health-monitor.log
-          fi
-          
-          # Check Redis
-          if nc -z redis-gpu 6379; then
-            echo 'Redis: Connected' >> /var/log/health-monitor.log
-          else
-            echo 'Redis: Disconnected' >> /var/log/health-monitor.log
-          fi
-          
-          echo '' >> /var/log/health-monitor.log
-          sleep 300  # Check every 5 minutes
-        done
-      "
-    
+    command: >
+      sh -c "apk add --no-cache curl jq;
+      while true; do
+        echo '=== System Health $(date) ===';
+        curl -sf http://surveillance-gpu:8080/health >/dev/null && echo 'API: Healthy' || echo 'API: Unhealthy';
+        curl -sf http://web-interface-gpu:8501/_stcore/health >/dev/null && echo 'Web: Healthy' || echo 'Web: Unhealthy';
+        nc -z postgres-gpu 5432 && echo 'Database: Connected' || echo 'Database: Disconnected';
+        nc -z redis-gpu 6379 && echo 'Redis: Connected' || echo 'Redis: Disconnected';
+        sleep 300;
+      done"
     volumes:
       - ./surveillance_data/logs:/var/log:rw
-    
     depends_on:
       - surveillance-gpu
       - postgres-gpu
       - redis-gpu
       - web-interface-gpu
-    
     networks:
       - surveillance_gpu_network
 
-# Persistent volumes
 volumes:
   postgres_gpu_data:
-    driver: local
-    name: surveillance_postgres_gpu_data
-  
   redis_gpu_data:
-    driver: local
-    name: surveillance_redis_gpu_data
-  
   gpu_model_cache:
-    driver: local
-    name: surveillance_gpu_model_cache
 
-# Custom network for GPU system
 networks:
   surveillance_gpu_network:
     driver: bridge
-    name: surveillance_gpu_network
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
