@@ -166,7 +166,7 @@ class AttendanceIntegratedSurveillance:
                 self._reset_daily_attendance()
             
             # Process frame with attendance module
-            annotated_frame, detections = self.attendance_module.process_frame(frame)
+            annotated_frame, detections = self.attendance_module.       (frame)
             
             # Update daily attendance statistics
             self._update_daily_stats(detections)
