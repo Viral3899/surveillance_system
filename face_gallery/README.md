@@ -13,7 +13,7 @@ This directory contains known face images for recognition.
 ## Examples:
 
 ```
-face_gallery/
+faces/
 ├── alice_johnson.jpg
 ├── bob_wilson.png
 ├── charlie_brown.jpg

@@ -532,7 +532,7 @@ def display_face_database(face_db: Dict):
             )
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No faces in database. Add face images to the face_gallery folder.")
+        st.info("No faces in database. Add face images to the faces folder.")
 
 def display_analytics(stats: Dict, events: List[Dict]):
     """Display analytics tab."""

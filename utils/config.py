@@ -36,7 +36,7 @@ class FaceConfig:
     """Face detection and recognition configuration."""
     model: str = "hog"  # hog or cnn
     tolerance: float = 0.6
-    face_gallery_path: str = "face_gallery"
+    face_gallery_path: str = "faces"
     encodings_file: str = "known_faces.pkl"
     detection_scale: float = 0.5  # Scale down for faster detection
 

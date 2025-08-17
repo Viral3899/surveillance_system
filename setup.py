@@ -12,7 +12,7 @@
 # def create_directories():
 #     """Create necessary directories."""
 #     directories = [
-#         'face_gallery',
+#         'faces',
 #         'surveillance_output',
 #         'surveillance_output/clips',
 #         'surveillance_output/images', 
@@ -146,7 +146,7 @@
 # ## Examples:
 
 # ```
-# face_gallery/
+# faces/
 # ├── alice_johnson.jpg
 # ├── bob_wilson.png
 # ├── charlie_brown.jpg
@@ -163,9 +163,9 @@
 # The system will automatically process these images and create face encodings for recognition.
 # '''
 
-#     with open('face_gallery/README.md', 'w',encoding='utf-8') as f:
+#     with open('faces/README.md', 'w',encoding='utf-8') as f:
 #         f.write(readme_content)
-#     print("✓ Created face_gallery/README.md")
+#     print("✓ Created faces/README.md")
 
 # def main():
 #     """Main setup function."""
@@ -193,7 +193,7 @@
 #     print("\n" + "=" * 50)
 #     print("✅ Setup complete!")
 #     print("\n📋 Next steps:")
-#     print("1. Add face images to the 'face_gallery/' directory")
+#     print("1. Add face images to the 'faces/' directory")
 #     print("2. Install dependencies: pip install -r requirements.txt") 
 #     print("3. Run the system: python main.py")
 #     print("\n💡 For help: python main.py --help")
@@ -383,7 +383,7 @@ def create_directories():
     
     directories = [
         # Core directories
-        'face_gallery',
+        'faces',
         'faces',
         'surveillance_output',
         'surveillance_output/clips',
@@ -567,7 +567,7 @@ learning_rate = 0.01
 model = hog
 tolerance = 0.6
 detection_scale = 0.5
-face_gallery_path = face_gallery
+face_gallery_path = faces
 encodings_file = known_faces.pkl
 
 [attendance]
@@ -647,7 +647,7 @@ def create_readme_files():
     print_header("CREATING README FILES")
     
     readme_files = {
-        'face_gallery/README.md': '''# Face Gallery for Recognition
+        'faces/README.md': '''# Face Gallery for Recognition
 
 This directory contains face images for the face recognition system.
 
@@ -662,7 +662,7 @@ This directory contains face images for the face recognition system.
 ## Examples:
 
 ```
-face_gallery/
+faces/
 ├── alice_johnson.jpg
 ├── bob_wilson.png
 ├── charlie_brown.jpg
@@ -796,7 +796,7 @@ python api_server.py --export-report --days 30
 ├── anomaly/                   # Anomaly detection
 ├── utils/                     # Utilities
 ├── faces/                     # Employee photos
-├── face_gallery/              # Recognition photos
+├── faces/              # Recognition photos
 ├── surveillance_output/       # System outputs
 └── attendance_reports/        # Attendance reports
 ```
@@ -912,7 +912,7 @@ def validate_installation():
     # Check directories
     print_info("Checking directory structure...")
     required_dirs = [
-        'faces', 'face_gallery', 'surveillance_output',
+        'faces', 'faces', 'surveillance_output',
         'attendance_reports', 'models', 'cache'
     ]
     

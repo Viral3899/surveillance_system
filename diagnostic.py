@@ -56,7 +56,7 @@ def check_directory_structure():
     
     required_dirs = [
         'faces',           # Employee photos
-        'face_gallery',    # Recognition photos (alternative)
+        'faces',    # Recognition photos (alternative)
         'surveillance_output', # System outputs
         'attendance_reports',  # Report exports
         'models',          # AI models
@@ -82,7 +82,7 @@ def check_face_images():
     """Check if face images are properly set up."""
     print("\n=== Face Images Check ===")
     
-    face_dirs = ['faces', 'face_gallery']
+    face_dirs = ['faces', 'faces']
     total_images = 0
     
     for face_dir in face_dirs:

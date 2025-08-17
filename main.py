@@ -604,11 +604,11 @@ Examples:
             print(f"Warning: Camera device {args.camera} may not exist")
     
     # Update config if custom paths provided
-    if args.face_gallery:
-        if not os.path.exists(args.face_gallery):
-            print(f"Error: Face gallery path does not exist: {args.face_gallery}")
+    if args.faces:
+        if not os.path.exists(args.faces):
+            print(f"Error: Face gallery path does not exist: {args.faces}")
             return 1
-        config.face.face_gallery_path = args.face_gallery
+        config.face.face_gallery_path = args.faces
         config._create_directories()
     
     if args.output_dir:

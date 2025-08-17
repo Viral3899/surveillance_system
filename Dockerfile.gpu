@@ -46,14 +46,14 @@ RUN mkdir -p /app/models && \
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p face_gallery surveillance_output/clips surveillance_output/images surveillance_output/logs
+RUN mkdir -p faces surveillance_output/clips surveillance_output/images surveillance_output/logs
 
 # Run setup script before non-root switch
 RUN python setup.py
 
 # Create app user & adjust permissions
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app face_gallery surveillance_output
+    chown -R appuser:appuser /app faces surveillance_output
 
 # Switch to non-root
 USER appuser

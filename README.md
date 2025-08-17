@@ -272,7 +272,7 @@ ai-surveillance-system/
 ├── 📁 scripts/                   # Deployment scripts
 │   ├── deploy.sh                 # Main deployment script
 │   └── backup.sh                 # Backup utilities
-├── 📁 face_gallery/              # Known face images
+├── 📁 faces/              # Known face images
 │   ├── person1.jpg               # Face recognition database
 │   └── person2.jpg
 ├── 📁 surveillance_data/         # Output data directory
@@ -330,10 +330,10 @@ REDIS_HOST=redis
 
 ### Face Recognition Setup
 
-Add known face images to the `face_gallery/` directory:
+Add known face images to the `faces/` directory:
 
 ```bash
-face_gallery/
+faces/
 ├── john_doe.jpg              # Clear, front-facing photo
 ├── jane_smith.png            # Good lighting, one person
 ├── alice_johnson.jpeg        # Supported: JPG, PNG, BMP

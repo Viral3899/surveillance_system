@@ -63,8 +63,8 @@ RUN useradd -m -u 1000 appuser && \
 COPY --chown=appuser:appuser . .
 
 # Create necessary directories
-RUN mkdir -p face_gallery surveillance_output/clips surveillance_output/images surveillance_output/logs && \
-    chown -R appuser:appuser face_gallery surveillance_output
+RUN mkdir -p faces surveillance_output/clips surveillance_output/images surveillance_output/logs && \
+    chown -R appuser:appuser faces surveillance_output
 
 # Switch to non-root user
 USER appuser

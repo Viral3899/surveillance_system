@@ -3,25 +3,33 @@
 Complete Employee Attendance Module with Segmentation Fault Prevention
 ====================================================================
 
-This version includes all missing methods and comprehensive error handling
-to prevent segmentation faults during face processing.
+This is a comprehensive facial recognition-based attendance system with:
+1. Complete thread safety and synchronization
+2. Graceful shutdown procedures
+3. Memory leak prevention
+4. All method implementations completed
+5. Comprehensive error handling and recovery
+6. Backup and restore functionality
+7. Detailed reporting capabilities
 
-Key improvements:
-- All missing methods implemented
-- Sequential image processing instead of parallel
-- Better memory management and cleanup
-- Image validation before processing
-- Graceful error recovery
-- Reduced memory footprint
+Key Features:
+- Safe face recognition processing
+- Real-time attendance logging
+- Comprehensive statistics and reporting
+- Thread-safe operations
+- Memory management
+- Backup/restore functionality
+- Excel-based attendance logging
 """
 
 import os
+import sys
 import cv2
 import numpy as np
 import pandas as pd
 import face_recognition
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import logging
 from pathlib import Path
 import pickle
@@ -29,21 +37,161 @@ import threading
 import time
 import shutil
 import hashlib
-import gc  # Garbage collection for memory management
+import gc
+import signal
+import atexit
+import weakref
+from contextlib import contextmanager
+import traceback
+import json
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging with thread safety
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('attendance_system.log', mode='a')
+    ]
+)
 logger = logging.getLogger(__name__)
+
+class SafeShutdownHandler:
+    """Handles safe shutdown procedures to prevent segfaults."""
+    
+    def __init__(self):
+        self.shutdown_requested = threading.Event()
+        self.active_threads = set()
+        self.cleanup_callbacks = []
+        self._lock = threading.RLock()
+        
+        # Register signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        # Register atexit handler
+        atexit.register(self.cleanup)
+    
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals gracefully."""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        self.request_shutdown()
+    
+    def request_shutdown(self):
+        """Request graceful shutdown of all components."""
+        self.shutdown_requested.set()
+        logger.info("Shutdown requested, cleaning up...")
+    
+    def register_thread(self, thread):
+        """Register a thread for cleanup tracking."""
+        with self._lock:
+            self.active_threads.add(thread)
+    
+    def unregister_thread(self, thread):
+        """Unregister a thread from cleanup tracking."""
+        with self._lock:
+            self.active_threads.discard(thread)
+    
+    def register_cleanup(self, callback):
+        """Register a cleanup callback."""
+        with self._lock:
+            self.cleanup_callbacks.append(callback)
+    
+    def cleanup(self):
+        """Perform complete system cleanup."""
+        logger.info("Starting safe shutdown cleanup...")
+        
+        try:
+            # Set shutdown flag
+            self.shutdown_requested.set()
+            
+            # Execute cleanup callbacks
+            with self._lock:
+                for callback in reversed(self.cleanup_callbacks):
+                    try:
+                        callback()
+                    except Exception as e:
+                        logger.error(f"Error in cleanup callback: {e}")
+            
+            # Wait for threads to finish
+            timeout = 5.0
+            start_time = time.time()
+            
+            with self._lock:
+                active_threads = list(self.active_threads)
+            
+            for thread in active_threads:
+                remaining_time = timeout - (time.time() - start_time)
+                if remaining_time > 0 and thread.is_alive():
+                    thread.join(timeout=remaining_time)
+                    if thread.is_alive():
+                        logger.warning(f"Thread {thread.name} did not shutdown gracefully")
+            
+            # Force garbage collection
+            gc.collect()
+            
+            logger.info("Safe shutdown cleanup completed")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown cleanup: {e}")
+
+# Global shutdown handler
+_shutdown_handler = SafeShutdownHandler()
+
+class ThreadSafeCounter:
+    """Thread-safe counter for statistics."""
+    
+    def __init__(self, initial_value: int = 0):
+        self._value = initial_value
+        self._lock = threading.Lock()
+    
+    def increment(self) -> int:
+        with self._lock:
+            self._value += 1
+            return self._value
+    
+    def get(self) -> int:
+        with self._lock:
+            return self._value
+    
+    def reset(self):
+        with self._lock:
+            self._value = 0
+
+class MemoryManager:
+    """Manages memory usage and prevents leaks."""
+    
+    def __init__(self, max_memory_mb: int = 512):
+        self.max_memory_bytes = max_memory_mb * 1024 * 1024
+        self.cleanup_threshold = 0.8  # Clean up at 80% of max memory
+        
+    def check_memory_usage(self) -> bool:
+        """Check if memory usage is within limits."""
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_usage = process.memory_info().rss
+            
+            if memory_usage > self.max_memory_bytes * self.cleanup_threshold:
+                logger.warning(f"High memory usage: {memory_usage / 1024 / 1024:.1f} MB")
+                gc.collect()
+                return False
+            
+            return True
+        except ImportError:
+            # psutil not available, skip memory checking
+            return True
+        except Exception as e:
+            logger.debug(f"Memory check failed: {e}")
+            return True
+    
+    def force_cleanup(self):
+        """Force memory cleanup."""
+        gc.collect()
 
 class EmployeeAttendanceModule:
     """
-    Memory-safe Employee Attendance Module that prevents segmentation faults.
-    
-    This version prioritizes stability over performance by:
-    - Processing images sequentially instead of in parallel
-    - Adding extensive validation and error handling
-    - Managing memory more carefully
-    - Providing fallback mechanisms
+    Complete Employee Attendance Module with comprehensive safety measures.
     """
     
     def __init__(self, 
@@ -53,19 +201,10 @@ class EmployeeAttendanceModule:
                  tolerance: float = 0.5,
                  encodings_cache: str = "face_encodings.pkl",
                  backup_enabled: bool = True,
-                 max_image_size: int = 1024):
-        """
-        Initialize the Safe Employee Attendance Module.
+                 max_image_size: int = 1024,
+                 max_memory_mb: int = 512):
+        """Initialize the Safe Employee Attendance Module."""
         
-        Args:
-            face_dir (str): Directory containing employee face images
-            attendance_file (str): Excel file path for attendance logging
-            cooldown_seconds (int): Cooldown period to prevent duplicate entries
-            tolerance (float): Face recognition tolerance (lower = stricter)
-            encodings_cache (str): Cache file for face encodings
-            backup_enabled (bool): Enable automatic backups
-            max_image_size (int): Maximum image dimension to prevent memory issues
-        """
         # Input validation
         if cooldown_seconds < 0:
             raise ValueError("cooldown_seconds must be non-negative")
@@ -80,6 +219,13 @@ class EmployeeAttendanceModule:
         self.backup_enabled = backup_enabled
         self.max_image_size = max_image_size
         
+        # Initialize memory manager
+        self.memory_manager = MemoryManager(max_memory_mb)
+        
+        # Thread safety and shutdown management
+        self.shutdown_requested = threading.Event()
+        self._shutdown_lock = threading.RLock()
+        
         # Face recognition data with thread safety
         self.known_face_encodings: List[np.ndarray] = []
         self.known_employee_ids: List[str] = []
@@ -92,16 +238,22 @@ class EmployeeAttendanceModule:
         self.daily_stats: Dict[str, Dict] = {}
         self._attendance_lock = threading.RLock()
         
-        # Performance tracking
-        self.detection_count = 0
-        self.attendance_logs = 0
+        # Performance tracking with thread-safe counters
+        self.detection_count = ThreadSafeCounter()
+        self.attendance_logs = ThreadSafeCounter()
         self.processing_times = []
         self._stats_lock = threading.Lock()
         
         # Error tracking
-        self.error_count = 0
+        self.error_count = ThreadSafeCounter()
         self.last_error_time = None
-        self.consecutive_errors = 0
+        self.consecutive_errors = ThreadSafeCounter()
+        
+        # Active resources tracking
+        self._active_resources = weakref.WeakSet()
+        
+        # Register for cleanup
+        _shutdown_handler.register_cleanup(self._cleanup_resources)
         
         # Initialize the module safely
         self._initialize_module_safely()
@@ -111,6 +263,11 @@ class EmployeeAttendanceModule:
     def _initialize_module_safely(self):
         """Initialize the module with comprehensive safety checks."""
         try:
+            # Check for shutdown request
+            if _shutdown_handler.shutdown_requested.is_set():
+                logger.warning("Shutdown requested during initialization")
+                return
+            
             # Create directories
             self._create_directories()
             
@@ -122,7 +279,7 @@ class EmployeeAttendanceModule:
                 logger.warning("No faces loaded, system will run in detection-only mode")
             
             # Force garbage collection after initialization
-            gc.collect()
+            self.memory_manager.force_cleanup()
             
             # Create initial backup if enabled
             if self.backup_enabled:
@@ -143,7 +300,8 @@ class EmployeeAttendanceModule:
             self.encodings_cache.parent,
             Path("backup"),
             Path("backup/daily"),
-            Path("logs")
+            Path("logs"),
+            Path("reports")
         ]
         
         for directory in directories:
@@ -209,13 +367,12 @@ class EmployeeAttendanceModule:
         logger.info(f"Created new attendance file: {self.attendance_file}")
     
     def load_known_faces_safely(self) -> bool:
-        """
-        Load and encode all faces with safety measures to prevent segfaults.
-        
-        Returns:
-            bool: True if faces were loaded successfully, False otherwise
-        """
+        """Load and encode all faces with safety measures to prevent segfaults."""
         try:
+            if _shutdown_handler.shutdown_requested.is_set():
+                logger.info("Shutdown requested, skipping face loading")
+                return False
+            
             # Try to load from cache first
             if self._load_encodings_cache():
                 logger.info("Loaded face encodings from cache")
@@ -360,15 +517,20 @@ class EmployeeAttendanceModule:
             logger.warning(f"No image files found in {self.face_dir}")
             return False
         
-        logger.info(f"Loading {len(image_files)} face images from: {self.face_dir} (sequential processing for safety)")
+        logger.info(f"Loading {len(image_files)} face images from: {self.face_dir}")
         
-        # Process images sequentially (not in parallel) to prevent memory issues
+        # Process images sequentially for safety
         loaded_count = 0
         new_encodings = []
         new_employee_ids = []
         new_metadata = {}
         
         for i, image_path in enumerate(image_files):
+            # Check for shutdown request
+            if _shutdown_handler.shutdown_requested.is_set():
+                logger.info("Shutdown requested during face loading")
+                break
+            
             try:
                 logger.info(f"Processing image {i+1}/{len(image_files)}: {image_path.name}")
                 
@@ -383,15 +545,14 @@ class EmployeeAttendanceModule:
                 else:
                     logger.warning(f"Failed to process: {image_path.name}")
                 
-                # Force garbage collection after each image to prevent memory buildup
-                gc.collect()
+                # Memory management
+                self.memory_manager.check_memory_usage()
                 
                 # Small delay to prevent overwhelming the system
-                time.sleep(0.1)
+                time.sleep(0.05)
                 
             except Exception as e:
                 logger.error(f"Critical error processing {image_path}: {e}")
-                # Continue with other images even if one fails
                 continue
         
         if loaded_count > 0:
@@ -430,7 +591,7 @@ class EmployeeAttendanceModule:
                 logger.warning(f"Image file too large: {image_path}")
                 return None
             
-            # Load and validate image using OpenCV first (more robust)
+            # Load and validate image using OpenCV first
             try:
                 cv_image = cv2.imread(str(image_path))
                 if cv_image is None:
@@ -482,7 +643,7 @@ class EmployeeAttendanceModule:
                     'added_timestamp': datetime.now().isoformat(),
                     'file_hash': self._calculate_file_hash(image_path),
                     'processed_safely': True,
-                    'name': employee_id  # Add name field
+                    'name': employee_id
                 }
                 
                 logger.debug(f"Successfully processed face: {employee_id}")
@@ -509,15 +670,12 @@ class EmployeeAttendanceModule:
             return ""
     
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict]]:
-        """
-        Process a video frame for face detection and attendance logging with safety measures.
+        """Process a video frame for face detection and attendance logging."""
+        # Check for shutdown request
+        if _shutdown_handler.shutdown_requested.is_set():
+            logger.debug("Shutdown requested, skipping frame processing")
+            return frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8), []
         
-        Args:
-            frame (np.ndarray): Input video frame
-            
-        Returns:
-            Tuple[np.ndarray, List[Dict]]: Annotated frame and detection results
-        """
         start_time = time.time()
         
         # Input validation
@@ -532,7 +690,7 @@ class EmployeeAttendanceModule:
                 return frame, []
         
         try:
-            self.detection_count += 1
+            self.detection_count.increment()
             current_time = datetime.now()
             
             # Validate frame dimensions
@@ -545,23 +703,28 @@ class EmployeeAttendanceModule:
                 logger.warning(f"Invalid frame dimensions: {width}x{height}")
                 return frame, []
             
-            # Resize frame for faster processing and memory safety
-            processing_scale = 0.25  # More aggressive scaling for safety
+            # Memory check before processing
+            if not self.memory_manager.check_memory_usage():
+                logger.warning("High memory usage, skipping frame processing")
+                return frame, []
+            
+            # Resize frame for faster processing
+            processing_scale = 0.25
             small_frame = cv2.resize(frame, (0, 0), fx=processing_scale, fy=processing_scale)
             
-            # Convert BGR to RGB with error handling
+            # Convert BGR to RGB
             try:
                 rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
             except cv2.error as e:
                 logger.warning(f"Color conversion error: {e}")
                 return frame, []
             
-            # Detect faces with safety measures
+            # Detect faces
             try:
                 face_locations = face_recognition.face_locations(rgb_small_frame)
                 
-                # Limit number of faces processed to prevent memory issues
-                max_faces = 5
+                # Limit number of faces processed
+                max_faces = 3
                 if len(face_locations) > max_faces:
                     logger.info(f"Too many faces detected ({len(face_locations)}), processing only first {max_faces}")
                     face_locations = face_locations[:max_faces]
@@ -575,8 +738,12 @@ class EmployeeAttendanceModule:
             detection_results = []
             annotated_frame = frame.copy()
             
-            # Process each detected face with safety measures
+            # Process each detected face
             for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                # Check for shutdown during processing
+                if _shutdown_handler.shutdown_requested.is_set():
+                    break
+                
                 try:
                     # Scale back up face locations
                     scale_factor = 1.0 / processing_scale
@@ -626,7 +793,7 @@ class EmployeeAttendanceModule:
                     
                     # Draw detection on frame
                     annotated_frame = self._draw_detection(annotated_frame, detection_result)
-                    
+                
                 except Exception as e:
                     logger.warning(f"Error processing face detection: {e}")
                     continue
@@ -639,11 +806,11 @@ class EmployeeAttendanceModule:
                     self.processing_times = self.processing_times[-100:]
             
             # Reset consecutive error count on successful processing
-            self.consecutive_errors = 0
+            self.consecutive_errors.reset()
             
-            # Force garbage collection periodically
-            if self.detection_count % 50 == 0:
-                gc.collect()
+            # Periodic memory cleanup
+            if self.detection_count.get() % 30 == 0:
+                self.memory_manager.force_cleanup()
             
             return annotated_frame, detection_results
             
@@ -727,7 +894,7 @@ class EmployeeAttendanceModule:
             success = self._save_attendance_record_safely(new_record)
             
             if success:
-                self.attendance_logs += 1
+                self.attendance_logs.increment()
                 logger.info(f"Logged attendance: {employee_name} ({employee_id}) - {visit_type} (Visit #{visit_count})")
             
             return visit_type, visit_count
@@ -908,16 +1075,16 @@ class EmployeeAttendanceModule:
     
     def _handle_error(self, error: Exception):
         """Handle errors with tracking and recovery."""
-        self.error_count += 1
+        self.error_count.increment()
         self.last_error_time = datetime.now()
-        self.consecutive_errors += 1
+        self.consecutive_errors.increment()
         
-        logger.error(f"Error #{self.error_count}: {error}")
+        logger.error(f"Error #{self.error_count.get()}: {error}")
         
         # Force garbage collection on errors
-        gc.collect()
+        self.memory_manager.force_cleanup()
         
-        if self.consecutive_errors >= 3:
+        if self.consecutive_errors.get() >= 3:
             logger.warning("Multiple consecutive errors, attempting recovery")
             self._attempt_recovery()
     
@@ -933,20 +1100,56 @@ class EmployeeAttendanceModule:
                 self.employee_metadata.clear()
             
             # Force garbage collection
-            gc.collect()
+            self.memory_manager.force_cleanup()
             
             # Reload faces with safety measures
             if self.load_known_faces_safely():
                 logger.info("Face data reloaded successfully")
-                self.consecutive_errors = 0
+                self.consecutive_errors.reset()
             else:
                 logger.warning("Face data reload failed")
                 
         except Exception as e:
             logger.error(f"Recovery attempt failed: {e}")
     
+    def _cleanup_resources(self):
+        """Clean up all resources during shutdown."""
+        try:
+            logger.info("Cleaning up attendance module resources...")
+            
+            # Set shutdown flag
+            self.shutdown_requested.set()
+            
+            # Wait a moment for any ongoing operations to complete
+            time.sleep(0.1)
+            
+            # Clear all data structures
+            with self._face_data_lock:
+                self.known_face_encodings.clear()
+                self.known_employee_ids.clear()
+                self.employee_metadata.clear()
+            
+            with self._attendance_lock:
+                self.last_seen_time.clear()
+                self.visit_counts.clear()
+                self.daily_stats.clear()
+            
+            # Clear processing times
+            with self._stats_lock:
+                self.processing_times.clear()
+            
+            # Force final memory cleanup
+            self.memory_manager.force_cleanup()
+            
+            logger.info("Attendance module cleanup completed")
+            
+        except Exception as e:
+            logger.error(f"Error during resource cleanup: {e}")
+    
+    # ========== PUBLIC API METHODS ==========
+    
     def get_statistics(self) -> Dict:
-        """Get module statistics."""
+        """Get comprehensive module statistics."""
         try:
             with self._face_data_lock:
                 total_employees = len(self.known_employee_ids)
@@ -964,16 +1167,18 @@ class EmployeeAttendanceModule:
                 'total_employees': total_employees,
                 'active_employees': active_employees,
                 'total_visits': total_visits,
-                'total_detections': self.detection_count,
-                'total_attendance_logs': self.attendance_logs,
+                'total_detections': self.detection_count.get(),
+                'total_attendance_logs': self.attendance_logs.get(),
                 'average_processing_time_ms': avg_processing_time * 1000,
-                'error_count': self.error_count,
-                'consecutive_errors': self.consecutive_errors,
+                'error_count': self.error_count.get(),
+                'consecutive_errors': self.consecutive_errors.get(),
                 'last_error_time': self.last_error_time.isoformat() if self.last_error_time else None,
                 'safe_mode': True,
                 'max_image_size': self.max_image_size,
                 'tolerance': self.tolerance,
-                'cooldown_seconds': self.cooldown_seconds
+                'cooldown_seconds': self.cooldown_seconds,
+                'memory_manager_active': True,
+                'shutdown_handler_active': not _shutdown_handler.shutdown_requested.is_set()
             }
             
         except Exception as e:
@@ -1161,7 +1366,7 @@ class EmployeeAttendanceModule:
             df = pd.read_excel(self.attendance_file, engine='openpyxl')
             
             if df.empty:
-                logger.error("No attendance data to export")
+                logger.error("No attendance data found")
                 return False
             
             # Filter by date range if provided
@@ -1178,235 +1383,738 @@ class EmployeeAttendanceModule:
             
             # Export to new file
             output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
             df.to_excel(output_path, index=False, engine='openpyxl')
             
-            logger.info(f"Exported {len(df)} attendance records to: {output_path}")
+            logger.info(f"Successfully exported {len(df)} records to: {output_path}")
             return True
             
         except Exception as e:
             logger.error(f"Error exporting attendance data: {e}")
             return False
     
-    def validate_system_integrity(self) -> Dict:
-        """Validate the integrity of the attendance system and return status."""
-        validation_results = {
-            'status': 'healthy',
-            'errors': [],
-            'warnings': [],
-            'checks_passed': 0,
-            'total_checks': 0,
-            'timestamp': datetime.now().isoformat()
-        }
-        
+    def backup_system(self) -> bool:
+        """Create a complete system backup."""
         try:
-            # Check 1: Face directory exists and has images
-            validation_results['total_checks'] += 1
-            if not self.face_dir.exists():
-                validation_results['errors'].append(f"Face directory does not exist: {self.face_dir}")
-            else:
-                supported_formats = {'.jpg', '.jpeg', '.png', '.bmp'}
-                image_files = [f for f in self.face_dir.iterdir() if f.suffix.lower() in supported_formats]
-                if not image_files:
-                    validation_results['warnings'].append(f"No face images found in {self.face_dir}")
-                else:
-                    validation_results['checks_passed'] += 1
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_dir = Path(f"backup/system_backup_{timestamp}")
+            backup_dir.mkdir(parents=True, exist_ok=True)
             
-            # Check 2: Known faces loaded
-            validation_results['total_checks'] += 1
-            with self._face_data_lock:
-                if len(self.known_face_encodings) == 0:
-                    validation_results['warnings'].append("No face encodings loaded")
-                else:
-                    validation_results['checks_passed'] += 1
-                    
-                # Check consistency between encodings and employee IDs
-                if len(self.known_face_encodings) != len(self.known_employee_ids):
-                    validation_results['errors'].append("Inconsistency between face encodings and employee IDs")
+            # Backup attendance file
+            if self.attendance_file.exists():
+                shutil.copy2(self.attendance_file, backup_dir / "attendance.xlsx")
             
-            # Check 3: Attendance file integrity
-            validation_results['total_checks'] += 1
+            # Backup encodings cache
+            if self.encodings_cache.exists():
+                shutil.copy2(self.encodings_cache, backup_dir / "face_encodings.pkl")
+            
+            # Backup face images
+            if self.face_dir.exists():
+                faces_backup = backup_dir / "faces"
+                shutil.copytree(self.face_dir, faces_backup, dirs_exist_ok=True)
+            
+            # Create backup metadata
+            metadata = {
+                'backup_timestamp': datetime.now().isoformat(),
+                'system_stats': self.get_statistics(),
+                'employee_list': self.get_employee_list(),
+                'backup_version': '1.0'
+            }
+            
+            with open(backup_dir / "backup_metadata.json", 'w') as f:
+                json.dump(metadata, f, indent=2, default=str)
+            
+            logger.info(f"System backup created: {backup_dir}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating system backup: {e}")
+            return False
+    
+    def restore_from_backup(self, backup_path: str) -> bool:
+        """Restore system from a backup."""
+        try:
+            backup_dir = Path(backup_path)
+            
+            if not backup_dir.exists():
+                logger.error(f"Backup directory does not exist: {backup_dir}")
+                return False
+            
+            # Check backup metadata
+            metadata_file = backup_dir / "backup_metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                logger.info(f"Restoring backup from: {metadata.get('backup_timestamp', 'Unknown')}")
+            
+            # Restore attendance file
+            backup_attendance = backup_dir / "attendance.xlsx"
+            if backup_attendance.exists():
+                shutil.copy2(backup_attendance, self.attendance_file)
+                logger.info("Restored attendance file")
+            
+            # Restore encodings cache
+            backup_encodings = backup_dir / "face_encodings.pkl"
+            if backup_encodings.exists():
+                shutil.copy2(backup_encodings, self.encodings_cache)
+                logger.info("Restored encodings cache")
+            
+            # Restore face images
+            backup_faces = backup_dir / "faces"
+            if backup_faces.exists():
+                if self.face_dir.exists():
+                    shutil.rmtree(self.face_dir)
+                shutil.copytree(backup_faces, self.face_dir)
+                logger.info("Restored face images")
+            
+            # Reload system after restore
+            self.load_known_faces_safely()
+            
+            logger.info(f"System restored from backup: {backup_dir}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error restoring from backup: {e}")
+            return False
+    
+    def export_attendance_report(self, output_dir: str = "reports", 
+                                start_date: str = None, end_date: str = None) -> bool:
+        """Export comprehensive attendance report with analytics."""
+        try:
             if not self.attendance_file.exists():
-                validation_results['warnings'].append(f"Attendance file does not exist: {self.attendance_file}")
+                logger.error("No attendance data available for report generation")
+                return False
+            
+            # Create output directory
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # Load attendance data
+            df = pd.read_excel(self.attendance_file, engine='openpyxl')
+            
+            if df.empty:
+                logger.error("No attendance data found")
+                return False
+            
+            # Filter by date range if provided
+            filtered_df = df.copy()
+            
+            if start_date or end_date:
+                filtered_df['Date'] = pd.to_datetime(filtered_df['Date'])
+                
+                if start_date:
+                    start_dt = pd.to_datetime(start_date)
+                    filtered_df = filtered_df[filtered_df['Date'] >= start_dt]
+                
+                if end_date:
+                    end_dt = pd.to_datetime(end_date)
+                    filtered_df = filtered_df[filtered_df['Date'] <= end_dt]
+            
+            # Generate timestamp for report
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create comprehensive report
+            report_data = {
+                'generation_info': {
+                    'generated_at': datetime.now().isoformat(),
+                    'total_records': len(filtered_df),
+                    'date_range': f"{start_date or 'All'} to {end_date or 'All'}",
+                    'unique_employees': filtered_df['Employee_ID'].nunique() if not filtered_df.empty else 0
+                },
+                'summary_statistics': {},
+                'employee_details': {},
+                'daily_summary': {},
+                'visit_type_analysis': {}
+            }
+            
+            if not filtered_df.empty:
+                # Summary statistics
+                report_data['summary_statistics'] = {
+                    'total_visits': len(filtered_df),
+                    'unique_employees': filtered_df['Employee_ID'].nunique(),
+                    'average_visits_per_employee': len(filtered_df) / filtered_df['Employee_ID'].nunique(),
+                    'date_range_days': (pd.to_datetime(filtered_df['Date'].max()) - 
+                                      pd.to_datetime(filtered_df['Date'].min())).days + 1 if len(filtered_df) > 1 else 1,
+                    'first_visit': filtered_df['Timestamp'].min(),
+                    'last_visit': filtered_df['Timestamp'].max()
+                }
+                
+                # Employee-wise analysis
+                employee_stats = filtered_df.groupby('Employee_ID').agg({
+                    'Employee_Name': 'first',
+                    'Visit_Count': 'max',
+                    'Date': ['count', 'min', 'max'],
+                    'Confidence': 'mean'
+                }).round(3)
+                
+                employee_stats.columns = ['Name', 'Total_Visits', 'Days_Active', 'First_Date', 'Last_Date', 'Avg_Confidence']
+                report_data['employee_details'] = employee_stats.to_dict('index')
+                
+                # Daily summary
+                daily_stats = filtered_df.groupby('Date').agg({
+                    'Employee_ID': 'nunique',
+                    'Visit_Count': 'sum'
+                })
+                daily_stats.columns = ['Unique_Employees', 'Total_Visits']
+                report_data['daily_summary'] = daily_stats.to_dict('index')
+                
+                # Visit type analysis
+                if 'Visit_Type' in filtered_df.columns:
+                    visit_type_stats = filtered_df.groupby('Visit_Type').size().to_dict()
+                    report_data['visit_type_analysis'] = visit_type_stats
+            
+            # Export detailed Excel report
+            excel_filename = f"attendance_report_{timestamp}.xlsx"
+            excel_path = output_path / excel_filename
+            
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # Raw data
+                filtered_df.to_excel(writer, sheet_name='Raw_Data', index=False)
+                
+                # Summary statistics
+                if report_data['employee_details']:
+                    pd.DataFrame.from_dict(report_data['employee_details'], orient='index').to_excel(
+                        writer, sheet_name='Employee_Summary'
+                    )
+                
+                # Daily summary
+                if report_data['daily_summary']:
+                    pd.DataFrame.from_dict(report_data['daily_summary'], orient='index').to_excel(
+                        writer, sheet_name='Daily_Summary'
+                    )
+                
+                # System statistics
+                system_stats = self.get_statistics()
+                pd.DataFrame([system_stats]).to_excel(writer, sheet_name='System_Stats', index=False)
+            
+            # Export JSON report for API consumption
+            json_filename = f"attendance_report_{timestamp}.json"
+            json_path = output_path / json_filename
+            
+            with open(json_path, 'w') as f:
+                json.dump(report_data, f, indent=2, default=str)
+            
+            # Create summary text report
+            text_filename = f"attendance_summary_{timestamp}.txt"
+            text_path = output_path / text_filename
+            
+            with open(text_path, 'w') as f:
+                f.write("EMPLOYEE ATTENDANCE REPORT\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Generated: {report_data['generation_info']['generated_at']}\n")
+                f.write(f"Date Range: {report_data['generation_info']['date_range']}\n")
+                f.write(f"Total Records: {report_data['generation_info']['total_records']}\n")
+                f.write(f"Unique Employees: {report_data['generation_info']['unique_employees']}\n\n")
+                
+                if report_data['summary_statistics']:
+                    f.write("SUMMARY STATISTICS\n")
+                    f.write("-" * 20 + "\n")
+                    for key, value in report_data['summary_statistics'].items():
+                        f.write(f"{key.replace('_', ' ').title()}: {value}\n")
+                    f.write("\n")
+                
+                if report_data['visit_type_analysis']:
+                    f.write("VISIT TYPE BREAKDOWN\n")
+                    f.write("-" * 20 + "\n")
+                    for visit_type, count in report_data['visit_type_analysis'].items():
+                        f.write(f"{visit_type}: {count}\n")
+                    f.write("\n")
+                
+                f.write("FILES GENERATED\n")
+                f.write("-" * 15 + "\n")
+                f.write(f"Excel Report: {excel_filename}\n")
+                f.write(f"JSON Data: {json_filename}\n")
+                f.write(f"Text Summary: {text_filename}\n")
+            
+            logger.info(f"Successfully generated attendance report in: {output_path}")
+            logger.info(f"Report covers {report_data['generation_info']['total_records']} records")
+            logger.info(f"Files generated: {excel_filename}, {json_filename}, {text_filename}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error generating attendance report: {e}")
+            return False
+    
+    def get_live_camera_feed(self, camera_index: int = 0) -> bool:
+        """Start live camera feed for real-time attendance monitoring."""
+        try:
+            logger.info(f"Starting live camera feed (camera {camera_index})")
+            
+            # Initialize camera
+            cap = cv2.VideoCapture(camera_index)
+            if not cap.isOpened():
+                logger.error(f"Could not open camera {camera_index}")
+                return False
+            
+            # Set camera properties for better performance
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            logger.info("Camera initialized successfully. Press 'q' to quit, 's' to take screenshot")
+            
+            frame_count = 0
+            screenshot_count = 0
+            
+            while True:
+                # Check for shutdown request
+                if _shutdown_handler.shutdown_requested.is_set():
+                    logger.info("Shutdown requested, stopping camera feed")
+                    break
+                
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning("Failed to read frame from camera")
+                    continue
+                
+                frame_count += 1
+                
+                # Process every nth frame to reduce load
+                if frame_count % 3 == 0:  # Process every 3rd frame
+                    processed_frame, detections = self.process_frame(frame)
+                    
+                    # Display frame
+                    cv2.imshow('Employee Attendance System', processed_frame)
+                    
+                    # Print detection info
+                    if detections:
+                        for detection in detections:
+                            emp_id = detection['employee_id']
+                            confidence = detection['confidence']
+                            visit_type = detection.get('visit_type', 'N/A')
+                            logger.info(f"Detected: {emp_id} (confidence: {confidence:.2f}, type: {visit_type})")
+                else:
+                    # Just display the raw frame
+                    cv2.imshow('Employee Attendance System', frame)
+                
+                # Handle key presses
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    logger.info("User requested quit")
+                    break
+                elif key == ord('s'):
+                    # Take screenshot
+                    screenshot_path = f"screenshots/screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    Path("screenshots").mkdir(exist_ok=True)
+                    cv2.imwrite(screenshot_path, frame)
+                    screenshot_count += 1
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                elif key == ord('r'):
+                    # Reload face data
+                    logger.info("Reloading face data...")
+                    if self.load_known_faces_safely():
+                        logger.info("Face data reloaded successfully")
+                    else:
+                        logger.warning("Face data reload failed")
+                elif key == ord('b'):
+                    # Create backup
+                    logger.info("Creating system backup...")
+                    if self.backup_system():
+                        logger.info("Backup created successfully")
+                    else:
+                        logger.warning("Backup creation failed")
+            
+            # Cleanup
+            cap.release()
+            cv2.destroyAllWindows()
+            
+            logger.info(f"Camera feed stopped. Processed {frame_count} frames, {screenshot_count} screenshots taken")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in live camera feed: {e}")
+            try:
+                cap.release()
+                cv2.destroyAllWindows()
+            except:
+                pass
+            return False
+    
+    def process_video_file(self, video_path: str, output_path: str = None) -> bool:
+        """Process a video file for attendance detection."""
+        try:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                logger.error(f"Video file does not exist: {video_path}")
+                return False
+            
+            logger.info(f"Processing video file: {video_path}")
+            
+            # Initialize video capture
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                logger.error(f"Could not open video file: {video_path}")
+                return False
+            
+            # Get video properties
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration = frame_count / fps if fps > 0 else 0
+            
+            logger.info(f"Video properties: {frame_count} frames, {fps} FPS, {duration:.1f} seconds")
+            
+            # Setup output video if requested
+            if output_path:
+                output_path = Path(output_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
             else:
+                out = None
+            
+            # Process video
+            processed_frames = 0
+            detections_log = []
+            
+            while True:
+                # Check for shutdown request
+                if _shutdown_handler.shutdown_requested.is_set():
+                    logger.info("Shutdown requested, stopping video processing")
+                    break
+                
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # Process frame
+                processed_frame, detections = self.process_frame(frame)
+                processed_frames += 1
+                
+                # Log detections with timestamp
+                if detections:
+                    frame_time = processed_frames / fps
+                    for detection in detections:
+                        detection['video_timestamp'] = frame_time
+                        detections_log.append(detection.copy())
+                
+                # Write to output video
+                if out:
+                    out.write(processed_frame)
+                
+                # Progress reporting
+                if processed_frames % (fps * 10) == 0:  # Every 10 seconds
+                    progress = (processed_frames / frame_count) * 100
+                    logger.info(f"Processing progress: {progress:.1f}% ({processed_frames}/{frame_count} frames)")
+            
+            # Cleanup
+            cap.release()
+            if out:
+                out.release()
+            
+            logger.info(f"Video processing completed: {processed_frames} frames processed")
+            logger.info(f"Total detections: {len(detections_log)}")
+            
+            # Save detections log
+            if detections_log:
+                log_path = video_path.parent / f"{video_path.stem}_detections.json"
+                with open(log_path, 'w') as f:
+                    json.dump(detections_log, f, indent=2, default=str)
+                logger.info(f"Detections log saved: {log_path}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing video file: {e}")
+            try:
+                cap.release()
+                if 'out' in locals() and out:
+                    out.release()
+            except:
+                pass
+            return False
+    
+    def get_attendance_trends(self, days: int = 30) -> Dict:
+        """Analyze attendance trends over specified number of days."""
+        try:
+            if not self.attendance_file.exists():
+                return {'error': 'No attendance data available'}
+            
+            df = pd.read_excel(self.attendance_file, engine='openpyxl')
+            if df.empty:
+                return {'error': 'No attendance data found'}
+            
+            # Filter data for specified days
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
+            
+            df['Date'] = pd.to_datetime(df['Date'])
+            df_filtered = df[df['Date'] >= start_date.date()]
+            
+            if df_filtered.empty:
+                return {'error': f'No data found for last {days} days'}
+            
+            # Calculate trends
+            trends = {
+                'period': f'Last {days} days',
+                'start_date': start_date.date().isoformat(),
+                'end_date': end_date.date().isoformat(),
+                'total_visits': len(df_filtered),
+                'unique_employees': df_filtered['Employee_ID'].nunique(),
+                'daily_averages': {},
+                'employee_activity': {},
+                'peak_hours': {},
+                'visit_patterns': {}
+            }
+            
+            # Daily statistics
+            daily_stats = df_filtered.groupby('Date').agg({
+                'Employee_ID': 'nunique',
+                'Visit_Count': 'sum'
+            })
+            daily_stats.columns = ['unique_employees', 'total_visits']
+            
+            trends['daily_averages'] = {
+                'avg_employees_per_day': daily_stats['unique_employees'].mean(),
+                'avg_visits_per_day': daily_stats['total_visits'].mean(),
+                'most_active_day': daily_stats['total_visits'].idxmax().isoformat(),
+                'least_active_day': daily_stats['total_visits'].idxmin().isoformat()
+            }
+            
+            # Employee activity ranking
+            employee_activity = df_filtered.groupby('Employee_ID').agg({
+                'Employee_Name': 'first',
+                'Date': 'nunique',
+                'Visit_Count': 'sum'
+            }).sort_values('Visit_Count', ascending=False)
+            
+            trends['employee_activity'] = employee_activity.head(10).to_dict('index')
+            
+            # Peak hours analysis
+            if 'Time' in df_filtered.columns:
+                df_filtered['Hour'] = pd.to_datetime(df_filtered['Time']).dt.hour
+                hourly_activity = df_filtered.groupby('Hour').size()
+                
+                trends['peak_hours'] = {
+                    'busiest_hour': int(hourly_activity.idxmax()),
+                    'quietest_hour': int(hourly_activity.idxmin()),
+                    'hourly_distribution': hourly_activity.to_dict()
+                }
+            
+            # Visit patterns
+            if 'Visit_Type' in df_filtered.columns:
+                visit_patterns = df_filtered['Visit_Type'].value_counts()
+                trends['visit_patterns'] = visit_patterns.to_dict()
+            
+            return trends
+            
+        except Exception as e:
+            logger.error(f"Error analyzing attendance trends: {e}")
+            return {'error': str(e)}
+    
+    def maintenance_mode(self, enable: bool = True) -> bool:
+        """Enable or disable maintenance mode."""
+        try:
+            if enable:
+                logger.info("Entering maintenance mode...")
+                
+                # Create maintenance backup
+                if self.backup_system():
+                    logger.info("Maintenance backup created")
+                
+                # Clear memory caches
+                self.memory_manager.force_cleanup()
+                
+                # Validate data integrity
+                integrity_check = self._check_data_integrity()
+                logger.info(f"Data integrity check: {'PASSED' if integrity_check else 'FAILED'}")
+                
+                logger.info("Maintenance mode enabled")
+                return True
+            else:
+                logger.info("Exiting maintenance mode...")
+                
+                # Reload face data
+                if self.load_known_faces_safely():
+                    logger.info("Face data reloaded successfully")
+                
+                logger.info("Maintenance mode disabled")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in maintenance mode: {e}")
+            return False
+    
+    def _check_data_integrity(self) -> bool:
+        """Check data integrity of all system components."""
+        try:
+            integrity_issues = []
+            
+            # Check face encodings consistency
+            with self._face_data_lock:
+                if len(self.known_face_encodings) != len(self.known_employee_ids):
+                    integrity_issues.append("Face encodings and employee IDs count mismatch")
+                
+                for emp_id in self.known_employee_ids:
+                    if emp_id not in self.employee_metadata:
+                        integrity_issues.append(f"Missing metadata for employee: {emp_id}")
+            
+            # Check attendance file
+            if self.attendance_file.exists():
                 try:
                     df = pd.read_excel(self.attendance_file, engine='openpyxl')
                     required_columns = ['Employee_ID', 'Employee_Name', 'Date', 'Time', 'Timestamp']
                     missing_columns = [col for col in required_columns if col not in df.columns]
                     if missing_columns:
-                        validation_results['errors'].append(f"Missing columns in attendance file: {missing_columns}")
-                    else:
-                        validation_results['checks_passed'] += 1
+                        integrity_issues.append(f"Missing attendance columns: {missing_columns}")
                 except Exception as e:
-                    validation_results['errors'].append(f"Cannot read attendance file: {e}")
+                    integrity_issues.append(f"Attendance file corruption: {e}")
             
-            # Check 4: Cache file integrity
-            validation_results['total_checks'] += 1
+            # Check encodings cache
             if self.encodings_cache.exists():
                 try:
                     with open(self.encodings_cache, 'rb') as f:
                         cache_data = pickle.load(f)
                     
-                    required_keys = ['encodings', 'employee_ids', 'metadata']
-                    if all(key in cache_data for key in required_keys):
-                        validation_results['checks_passed'] += 1
-                    else:
-                        validation_results['warnings'].append("Invalid cache file format")
+                    if 'encodings' not in cache_data or 'employee_ids' not in cache_data:
+                        integrity_issues.append("Invalid encodings cache structure")
                 except Exception as e:
-                    validation_results['warnings'].append(f"Cannot read cache file: {e}")
+                    integrity_issues.append(f"Encodings cache corruption: {e}")
+            
+            if integrity_issues:
+                logger.warning(f"Data integrity issues found: {integrity_issues}")
+                return False
             else:
-                validation_results['checks_passed'] += 1  # No cache is fine
-            
-            # Check 5: Directory permissions
-            validation_results['total_checks'] += 1
-            try:
-                # Test write permissions in key directories
-                test_dirs = [self.face_dir.parent, self.attendance_file.parent, Path("backup")]
-                for test_dir in test_dirs:
-                    if test_dir.exists():
-                        test_file = test_dir / f"test_write_{int(time.time())}.tmp"
-                        try:
-                            test_file.touch()
-                            test_file.unlink()
-                        except Exception:
-                            validation_results['warnings'].append(f"No write permission in {test_dir}")
-                            break
-                else:
-                    validation_results['checks_passed'] += 1
-            except Exception as e:
-                validation_results['warnings'].append(f"Cannot check directory permissions: {e}")
-            
-            # Check 6: Memory and performance
-            validation_results['total_checks'] += 1
-            try:
-                with self._stats_lock:
-                    if len(self.processing_times) > 0:
-                        avg_time = np.mean(self.processing_times)
-                        if avg_time > 5.0:  # More than 5 seconds average
-                            validation_results['warnings'].append(f"High average processing time: {avg_time:.2f}s")
-                        else:
-                            validation_results['checks_passed'] += 1
-                    else:
-                        validation_results['checks_passed'] += 1  # No processing yet is fine
-            except Exception as e:
-                validation_results['warnings'].append(f"Cannot check performance metrics: {e}")
-            
-            # Check 7: Error tracking
-            validation_results['total_checks'] += 1
-            if self.consecutive_errors >= 3:
-                validation_results['errors'].append(f"High consecutive error count: {self.consecutive_errors}")
-            elif self.error_count > 50:
-                validation_results['warnings'].append(f"High total error count: {self.error_count}")
-            else:
-                validation_results['checks_passed'] += 1
-            
-            # Check 8: Configuration validation
-            validation_results['total_checks'] += 1
-            config_issues = []
-            if not 0.0 <= self.tolerance <= 1.0:
-                config_issues.append(f"Invalid tolerance value: {self.tolerance}")
-            if self.cooldown_seconds < 0:
-                config_issues.append(f"Invalid cooldown: {self.cooldown_seconds}")
-            if self.max_image_size < 100:
-                config_issues.append(f"Max image size too small: {self.max_image_size}")
-            
-            if config_issues:
-                validation_results['errors'].extend(config_issues)
-            else:
-                validation_results['checks_passed'] += 1
-            
-            # Determine overall status
-            if validation_results['errors']:
-                validation_results['status'] = 'error'
-            elif validation_results['warnings']:
-                validation_results['status'] = 'warning'
-            else:
-                validation_results['status'] = 'healthy'
-            
-            # Add summary statistics
-            validation_results.update({
-                'total_employees': len(self.known_employee_ids),
-                'total_detections': self.detection_count,
-                'total_attendance_logs': self.attendance_logs,
-                'error_count': self.error_count,
-                'consecutive_errors': self.consecutive_errors,
-                'success_rate': f"{(validation_results['checks_passed'] / validation_results['total_checks'] * 100):.1f}%"
-            })
-            
-            logger.info(f"System validation completed: {validation_results['status']} "
-                       f"({validation_results['checks_passed']}/{validation_results['total_checks']} checks passed)")
-            
-            return validation_results
-            
+                logger.info("All data integrity checks passed")
+                return True
+                
         except Exception as e:
-            logger.error(f"Error during system validation: {e}")
-            validation_results.update({
-                'status': 'error',
-                'errors': [f"Validation failed: {e}"],
-                'checks_passed': 0
-            })
-            return validation_results
+            logger.error(f"Error checking data integrity: {e}")
+            return False
     
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit with cleanup."""
+    def get_system_health(self) -> Dict:
+        """Get comprehensive system health information."""
         try:
-            # Final backup if enabled
-            if self.backup_enabled:
-                self._create_backup()
+            health_info = {
+                'timestamp': datetime.now().isoformat(),
+                'status': 'HEALTHY',
+                'components': {},
+                'performance': {},
+                'recommendations': []
+            }
             
-            # Force final garbage collection
-            gc.collect()
+            # Check face recognition component
+            with self._face_data_lock:
+                face_component_health = {
+                    'status': 'OK' if len(self.known_face_encodings) > 0 else 'WARNING',
+                    'total_faces': len(self.known_face_encodings),
+                    'cache_exists': self.encodings_cache.exists(),
+                    'face_dir_exists': self.face_dir.exists()
+                }
+                health_info['components']['face_recognition'] = face_component_health
             
-            logger.info("Safe Employee Attendance Module shutdown complete")
+            # Check attendance logging component
+            attendance_component_health = {
+                'status': 'OK' if self.attendance_file.exists() else 'ERROR',
+                'file_exists': self.attendance_file.exists(),
+                'total_logs': self.attendance_logs.get(),
+                'backup_enabled': self.backup_enabled
+            }
+            health_info['components']['attendance_logging'] = attendance_component_health
+            
+            # Performance metrics
+            with self._stats_lock:
+                avg_processing_time = np.mean(self.processing_times) if self.processing_times else 0
+                
+            performance_info = {
+                'avg_processing_time_ms': avg_processing_time * 1000,
+                'total_detections': self.detection_count.get(),
+                'error_rate': self.error_count.get() / max(1, self.detection_count.get()),
+                'consecutive_errors': self.consecutive_errors.get(),
+                'memory_usage_ok': self.memory_manager.check_memory_usage()
+            }
+            health_info['performance'] = performance_info
+            
+            # Generate recommendations
+            recommendations = []
+            
+            if len(self.known_face_encodings) == 0:
+                recommendations.append("No face encodings loaded. Add employee faces to the system.")
+            
+            if not self.attendance_file.exists():
+                recommendations.append("Attendance file not found. System will create one on first detection.")
+            
+            if self.consecutive_errors.get() > 0:
+                recommendations.append("Recent errors detected. Consider running maintenance mode.")
+            
+            if avg_processing_time > 0.5:  # More than 500ms
+                recommendations.append("High processing times detected. Consider reducing image sizes or tolerance.")
+            
+            if not self.memory_manager.check_memory_usage():
+                recommendations.append("High memory usage detected. Consider reducing max_memory_mb setting.")
+            
+            health_info['recommendations'] = recommendations
+            
+            # Overall status
+            if any(comp['status'] == 'ERROR' for comp in health_info['components'].values()):
+                health_info['status'] = 'ERROR'
+            elif any(comp['status'] == 'WARNING' for comp in health_info['components'].values()):
+                health_info['status'] = 'WARNING'
+            
+            return health_info
             
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            logger.error(f"Error getting system health: {e}")
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'status': 'ERROR',
+                'error': str(e)
+            }
 
+# ========== MAIN EXECUTION AND EXAMPLES ==========
 
-# Convenience function for creating the safe module
-def create_safe_attendance_module(**kwargs) -> EmployeeAttendanceModule:
-    """Create and return a EmployeeAttendanceModule instance."""
+def main():
+    """Main function demonstrating usage of the Employee Attendance Module."""
     try:
-        return EmployeeAttendanceModule(**kwargs)
-    except Exception as e:
-        logger.error(f"Failed to create safe attendance module: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    print("Safe Employee Attendance Module - Testing Mode")
-    
-    try:
-        # Initialize with safety measures
-        with EmployeeAttendanceModule(
+        logger.info("Starting Employee Attendance System Demo")
+        
+        # Initialize the module
+        attendance_module = EmployeeAttendanceModule(
             face_dir="faces",
             attendance_file="attendance.xlsx",
-            cooldown_seconds=5,
+            cooldown_seconds=300,  # 5 minutes
             tolerance=0.5,
             backup_enabled=True,
-            max_image_size=800  # Smaller images for safety
-        ) as attendance:
-            
-            stats = attendance.get_statistics()
-            print("\nSafe Module Statistics:")
-            for key, value in stats.items():
-                print(f"  {key}: {value}")
-            
-            # Test employee list
-            employees = attendance.get_employee_list()
-            if employees:
-                print(f"\nLoaded Employees ({len(employees)}):")
-                for emp in employees:
-                    print(f"  - {emp['employee_id']}: {emp['employee_name']}")
-            else:
-                print("\nNo employees loaded")
-            
-            print("\nSafe module test completed successfully")
-            
+            max_image_size=800,
+            max_memory_mb=256
+        )
+        
+        # Display system health
+        health = attendance_module.get_system_health()
+        logger.info(f"System Health: {health['status']}")
+        
+        # Display statistics
+        stats = attendance_module.get_statistics()
+        logger.info(f"Loaded {stats['total_employees']} employees")
+        
+        # Demo: Live camera feed (uncomment to use)
+        # attendance_module.get_live_camera_feed(camera_index=0)
+        
+        # Demo: Process a video file (uncomment to use)
+        # attendance_module.process_video_file("input_video.mp4", "output_video.mp4")
+        
+        # Demo: Generate attendance report
+        if attendance_module.export_attendance_report():
+            logger.info("Attendance report generated successfully")
+        
+        # Demo: Get attendance trends
+        trends = attendance_module.get_attendance_trends(days=7)
+        if 'error' not in trends:
+            logger.info(f"Attendance trends analyzed for {trends['total_visits']} visits")
+        
+        logger.info("Demo completed successfully")
+        
+    except KeyboardInterrupt:
+        logger.info("Demo interrupted by user")
     except Exception as e:
-        print(f"Safe module test failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Demo failed: {e}")
+    finally:
+        logger.info("Shutting down safely...")
+        _shutdown_handler.request_shutdown()
+
+if __name__ == "__main__":
+    main()
