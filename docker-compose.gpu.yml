@@ -14,7 +14,7 @@ services:
       - CUDA_VISIBLE_DEVICES=0
       - CAMERA_ID=0
       - LOG_LEVEL=INFO
-      - FACE_GALLERY_PATH=/app/face_gallery
+      - FACE_GALLERY_PATH=/app/faces
       - OUTPUT_DIR=/app/surveillance_output
       - POSTGRES_HOST=postgres-gpu
       - POSTGRES_USER=surveillance_user
@@ -27,7 +27,7 @@ services:
     devices:
       - /dev/video0:/dev/video0
     volumes:
-      - ./face_gallery:/app/face_gallery:rw
+      - ./faces:/app/faces:rw
       - ./surveillance_data:/app/surveillance_output:rw
       - ./config:/app/config:ro
       - ./models:/app/models:rw
@@ -135,7 +135,7 @@ services:
       - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
     volumes:
       - ./surveillance_data:/app/surveillance_output:ro
-      - ./face_gallery:/app/face_gallery:ro
+      - ./faces:/app/faces:ro
     ports:
       - "8512:8501"
     depends_on:
