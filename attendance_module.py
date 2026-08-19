@@ -46,6 +46,8 @@ from contextlib import contextmanager
 import traceback
 import json
 
+from attendance.storage import AttendanceRepository
+
 # Configure logging with thread safety
 logging.basicConfig(
     level=logging.INFO, 
@@ -243,7 +245,8 @@ class EmployeeAttendanceModule:
                  encodings_cache: str = "face_encodings.pkl",
                  backup_enabled: bool = True,
                  max_image_size: int = 800,  # Reduced for memory
-                 max_memory_mb: int = 256):  # Reduced default
+                 max_memory_mb: int = 256,   # Reduced default
+                 database_path: Optional[str] = None):
         """Initialize the Safe Employee Attendance Module."""
         
         # Input validation
@@ -259,6 +262,15 @@ class EmployeeAttendanceModule:
         self.encodings_cache = Path(encodings_cache)
         self.backup_enabled = backup_enabled
         self.max_image_size = max_image_size
+        
+        # Persistent storage
+        self.database_path = self._resolve_database_path(database_path)
+        self.repository: Optional[AttendanceRepository] = None
+        try:
+            self.repository = AttendanceRepository(str(self.database_path))
+            logger.info(f"Attendance repository initialized at {self.database_path}")
+        except Exception as e:
+            logger.warning(f"Attendance repository disabled: {e}")
         
         # Initialize enhanced memory manager
         self.memory_manager = MemoryManager(max_memory_mb)
@@ -307,6 +319,15 @@ class EmployeeAttendanceModule:
         self._initialize_module_safely()
         
         logger.info(f"Safe Employee Attendance Module initialized with {len(self.known_employee_ids)} employees")
+    
+    def _resolve_database_path(self, explicit_path: Optional[str]) -> Path:
+        if explicit_path:
+            return Path(explicit_path)
+        try:
+            from utils.config import config as global_config
+            return Path(global_config.attendance.database_file)
+        except Exception:
+            return self.attendance_file.with_suffix('.db')
     
     def _initialize_module_safely(self):
         """Initialize the module with comprehensive safety checks."""
@@ -1180,6 +1201,13 @@ class EmployeeAttendanceModule:
         """Save attendance record with atomic operations and extensive error handling."""
         max_retries = 3
         
+        if self.repository:
+            try:
+                self.repository.record_attendance(record)
+                return True
+            except Exception as e:
+                logger.warning(f"Attendance repository write failed, falling back to Excel: {e}")
+        
         for attempt in range(max_retries):
             try:
                 if self.backup_enabled and attempt == 0:
@@ -1355,20 +1383,42 @@ class EmployeeAttendanceModule:
                                 start_date: str = None, end_date: str = None) -> bool:
         """Fixed version of export_attendance_report with proper data type handling."""
         try:
-            if not self.attendance_file.exists():
-                logger.error("No attendance data available for report generation")
-                return False
-            
             # Create output directory
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
-            
-            # Load attendance data with proper error handling
-            try:
-                df = pd.read_excel(self.attendance_file, engine='openpyxl')
-            except Exception as e:
-                logger.error(f"Failed to read attendance file: {e}")
-                return False
+
+            df = None
+            if self.repository:
+                records = self.repository.fetch_records(start_date, end_date)
+                if not records:
+                    logger.error("No attendance data available for report generation")
+                    return False
+                df = pd.DataFrame(records)
+                df.rename(
+                    columns={
+                        'employee_id': 'Employee_ID',
+                        'employee_name': 'Employee_Name',
+                        'timestamp': 'Timestamp',
+                        'visit_type': 'Visit_Type',
+                        'visit_count': 'Visit_Count',
+                        'confidence': 'Confidence'
+                    },
+                    inplace=True
+                )
+                df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+                df['Date'] = df['Timestamp'].dt.date
+            else:
+                if not self.attendance_file.exists():
+                    logger.error("No attendance data available for report generation")
+                    return False
+                try:
+                    df = pd.read_excel(self.attendance_file, engine='openpyxl')
+                except Exception as e:
+                    logger.error(f"Failed to read attendance file: {e}")
+                    return False
+                if df.empty:
+                    logger.error("No attendance data found")
+                    return False
             
             if df.empty:
                 logger.error("No attendance data found")
@@ -1399,7 +1449,7 @@ class EmployeeAttendanceModule:
             # Filter by date range if provided
             filtered_df = df.copy()
             
-            if start_date or end_date:
+            if (start_date or end_date) and not self.repository:
                 try:
                     if start_date:
                         start_dt = pd.to_datetime(start_date)

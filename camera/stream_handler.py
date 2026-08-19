@@ -8,7 +8,10 @@ import numpy as np
 from typing import Optional, Generator, Tuple
 import threading
 from queue import Queue, Empty
-import torch
+try:
+    import torch  # type: ignore
+except ImportError:
+    torch = None  # type: ignore
 
 from utils.config import config
 from utils.logger import logger
@@ -30,7 +33,7 @@ class CameraStream:
         self._current_fps = 0
         
         # GPU optimization
-        self.use_cuda = config.gpu.use_cuda and torch.cuda.is_available()
+        self.use_cuda = bool(torch and config.gpu.use_cuda and torch.cuda.is_available())
         if self.use_cuda:
             logger.info(f"CUDA available: {torch.cuda.get_device_name()}")
         

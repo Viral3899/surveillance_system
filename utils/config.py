@@ -46,9 +46,18 @@ class AttendanceConfig:
     enabled: bool = True
     face_gallery_path: str = "faces"
     attendance_file: str = "attendance.xlsx"
+    database_file: str = "attendance_reports/attendance.db"
     face_tolerance: float = 0.5
-    cooldown_seconds: int = 600  # 10 minutes
+    cooldown_seconds: int = 1800  # 30 minutes
     encodings_cache_file: str = "face_encodings.pkl"
+    
+    # Database configuration
+    database_type: str = "mysql"  # "sqlite" or "mysql"
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str = "root"
+    mysql_database: str = "attendance_db"
     
     # Performance settings
     detection_scale: float = 1.0
@@ -148,6 +157,7 @@ class Config:
             self.attendance.enabled = os.getenv("ATTENDANCE_ENABLED", "true").lower() == "true"
             self.attendance.face_gallery_path = os.getenv("FACE_GALLERY_DIR", self.attendance.face_gallery_path)
             self.attendance.attendance_file = os.getenv("ATTENDANCE_FILE", self.attendance.attendance_file)
+            self.attendance.database_file = os.getenv("ATTENDANCE_DB_FILE", self.attendance.database_file)
             
             # Convert numeric environment variables with validation
             try:
@@ -172,6 +182,24 @@ class Config:
                     raise ValueError("Retention days must be positive")
             except ValueError as e:
                 logger.warning(f"Invalid retention days, using default: {e}")
+            
+            # Database type and MySQL settings
+            self.attendance.database_type = os.getenv("DATABASE_TYPE", self.attendance.database_type).lower()
+            self.attendance.mysql_host = os.getenv("MYSQL_HOST", self.attendance.mysql_host)
+            try:
+                self.attendance.mysql_port = int(os.getenv("MYSQL_PORT", self.attendance.mysql_port))
+            except ValueError:
+                logger.warning(f"Invalid MySQL port, using default: {self.attendance.mysql_port}")
+            self.attendance.mysql_user = os.getenv("MYSQL_USER", self.attendance.mysql_user)
+            self.attendance.mysql_password = os.getenv("MYSQL_PASSWORD", self.attendance.mysql_password)
+            self.attendance.mysql_database = os.getenv("MYSQL_DATABASE", self.attendance.mysql_database)
+            
+            # Log database configuration
+            if self.attendance.database_type == "mysql":
+                logger.info(
+                    f"MySQL configured: {self.attendance.mysql_user}@{self.attendance.mysql_host}:"
+                    f"{self.attendance.mysql_port}/{self.attendance.mysql_database}"
+                )
             
             # GPU settings
             self.gpu.use_cuda = os.getenv("ENABLE_GPU", "true").lower() == "true"
@@ -259,6 +287,7 @@ class Config:
             self.attendance.reports_directory,
             os.path.join(self.attendance.reports_directory, "backup"),
             os.path.dirname(self.attendance.log_file) if "/" in self.attendance.log_file else "logs",
+            Path(self.attendance.database_file).parent,
             "cache",
             "backup",
             "backup/daily",
@@ -333,6 +362,7 @@ class Config:
             'enabled': self.attendance.enabled,
             'face_gallery_path': self.attendance.face_gallery_path,
             'attendance_file': self.attendance.attendance_file,
+            'database_file': self.attendance.database_file,
             'face_tolerance': self.attendance.face_tolerance,
             'cooldown_seconds': self.attendance.cooldown_seconds,
             'auto_backup': self.attendance.auto_backup,

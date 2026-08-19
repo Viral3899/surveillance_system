@@ -14,6 +14,8 @@ import numpy as np
 from pathlib import Path
 import importlib
 
+from utils.config import config
+
 def check_python_environment():
     """Check if Python environment is set up correctly."""
     print("=== Python Environment Check ===")
@@ -185,7 +187,8 @@ def test_attendance_module():
             face_dir="faces",
             attendance_file="test_attendance.xlsx",
             cooldown_seconds=1,  # Short cooldown for testing
-            tolerance=0.5
+            tolerance=0.5,
+            database_path=config.attendance.database_file
         )
         
         print("✅ Attendance module imported successfully")

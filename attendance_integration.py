@@ -55,10 +55,11 @@ class AttendanceIntegratedSurveillance:
         
         # Initialize attendance module
         self.attendance_module = EmployeeAttendanceModule(
-            face_dir="faces",
-            attendance_file="attendance.xlsx",
-            cooldown_seconds=5,
-            tolerance=0.5
+            face_dir=config.attendance.face_gallery_path,
+            attendance_file=config.attendance.attendance_file,
+            cooldown_seconds=config.attendance.cooldown_seconds,
+            tolerance=config.attendance.face_tolerance,
+            database_path=config.attendance.database_file
         )
         
         # Camera stream
@@ -500,10 +501,11 @@ def integrate_attendance_with_existing_system():
                 
                 # Add attendance module
                 self.attendance_module = EmployeeAttendanceModule(
-                    face_dir="faces",
-                    attendance_file="attendance.xlsx",
-                    cooldown_seconds=5,
-                    tolerance=0.5
+                    face_dir=config.attendance.face_gallery_path,
+                    attendance_file=config.attendance.attendance_file,
+                    cooldown_seconds=config.attendance.cooldown_seconds,
+                    tolerance=config.attendance.face_tolerance,
+                    database_path=config.attendance.database_file
                 )
                 
                 # Enhanced API endpoints
@@ -605,7 +607,8 @@ def main():
             face_dir=args.face_dir,
             attendance_file=args.attendance_file,
             cooldown_seconds=args.cooldown,
-            tolerance=args.tolerance
+            tolerance=args.tolerance,
+            database_path=config.attendance.database_file
         )
         
         # Create integrated surveillance system

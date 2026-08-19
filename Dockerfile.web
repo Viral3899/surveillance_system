@@ -1,0 +1,38 @@
+# Lightweight web interface container
+FROM python:3.9-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal dependencies for web interface
+RUN apt-get update && apt-get install -y \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Working directory
+WORKDIR /app
+
+# Copy web requirements
+COPY requirements.web.txt .
+
+# Install web dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.web.txt
+
+# Create app user
+RUN useradd -m -u 1000 webuser && \
+    chown -R webuser:webuser /app
+
+# Copy web application files
+COPY --chown=webuser:webuser web/ .
+
+# Switch to non-root user
+USER webuser
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8501/_stcore/health || exit 1
+
+CMD ["streamlit", "run", "web_interface.py", "--server.port=8501", "--server.address=0.0.0.0"]

@@ -235,6 +235,28 @@ make monitor
 make logs
 ```
 
+### REST API Server
+
+The FastAPI control plane exposes system status, start/stop controls, and attendance data over HTTP.
+
+```bash
+# Launch the API server
+python api_server.py
+
+# Environment overrides
+export API_HOST=0.0.0.0
+export API_PORT=8080
+```
+
+Key endpoints:
+
+- `GET /status` — live system metrics + attendance summary
+- `POST /control` — start/stop/reset/restart the controller
+- `GET /attendance/logs` — latest attendance events stored in SQLite
+- `POST /attendance/employees` — register or update employee metadata
+
+All responses are JSON and CORS-enabled for quick dashboard integration.
+
 ---
 
 ## 📁 Project Structure
@@ -322,6 +344,7 @@ CONFIDENCE_THRESHOLD=0.7      # Anomaly confidence threshold
 # Storage Settings
 MAX_STORAGE_GB=5.0           # Maximum storage for recordings
 RETENTION_DAYS=30            # Days to keep recordings
+ATTENDANCE_DB_FILE=attendance_reports/attendance.db  # SQLite store for attendance logs
 
 # Database Settings
 POSTGRES_PASSWORD=your_secure_password
